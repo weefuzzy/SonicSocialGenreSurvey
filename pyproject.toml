@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "sonicsocialgenre-survey"
+version = "0.1.0"
+description = "Code for querying survey data of MGR papers"
+authors = ["Owen Green <gungwho@gmail.com>"]
+readme = "README.md"
+packages = [{include = "sonicsocialgenre_survey"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pandas = "^2.2.0"
+matplotlib = "^3.8.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
