@@ -19,7 +19,7 @@ datamaps = {
     },
     "new": {
         "type": ["Review", "Experimental"],
-        "datasets": ["GTZAN", "PMG-Data"],
+        "datasets": ["GTZAN", "MSD-I"],
         "aggregates": ["Number public", "No. datasets"],
         "data_types": ["Music audio", "Non-Western?"],
         "doe": ["Classify", "Generalize"],
