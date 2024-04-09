@@ -1,98 +1,118 @@
+import re
+from collections import defaultdict
+import numpy as np
 import pandas as pd
-import itertools
-from functools import partial
+import bibtexparser
 
 
-""" 
-Dictionaries to map column ranges to data levels, so that we group (e.g.) datasets together with pd Multindex for easier querying 
-keys are top-level category, values are column *ranges* given by start and end labels (inclusive)
-it's absolutely up to us as frail humans to ensure that these make sense: minimal error checking at this point
-"""
-datamaps = {
-    "old": {
-        "type": ["Review", "Experimental"],
-        "datasets": ["GTZAN", "Unique"],
-        "aggregates": ["Number public", "No. datasets"],
-        "data_types": ["Music audio", "Non-Western?"],
-        "doe": ["Classify", "Generalize"],
-        "fom": ["Accuracy", "confusion instances"],
-    },
-    "new": {
-        "type": ["Review", "Experimental"],
-        "datasets": ["GTZAN", "MSD-I"],
-        "aggregates": ["Number public", "No. datasets"],
-        "data_types": ["Music audio", "Non-Western?"],
-        "doe": ["Classify", "Generalize"],
-        "fom": ["Accuracy", "confusion instances"],
-        "curiosity": ["Cites Critical MIR", "Engages Genre-Theory"],
-        "rationale": ["Information Overload", "Public Utility"],
-        "ontology": ["Flat", "Graph"],
-    },
-}
+def load_bib(path):
+    """Load a bibtex file return a data frame with the vitals"""
+    library = bibtexparser.parse_file(path)
 
+    t = {"article": "journal", "inproceedings": "conference"}
 
-def read_survey_csv(path, skiprows):
-    """
-    Read in one of the CSV files, ignoring surplus rows; fill empty cells with 0 nor NaN; delete unamed cols; make sure data is numeric
-    """
-    # SKIP = [0, 2, 3]
-    # read in csv, skipping unneeded rows at top 
-    df = pd.read_csv(path, skiprows=skiprows, index_col=0).fillna(value=0)
-    # drop unamed cols
-    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-    # end of usuable data range is marked by TOTALS row, find that point and snip
-    index_end = df.index.get_loc('TOTALS')
-    df = df[:index_end - 1]    
-    # get rid of empty rows
-    df = df[df.index.notnull()]
-    # mop up any 'I am not a number' weirdness
-    df = df.apply(partial(pd.to_numeric, errors="coerce"))
-    return df
-
-
-def getcolrange(df, start_label, end_label):
-    """
-    Return the list of column labels in df between start_label and end_label, inclusive
-    """
-    s = df.columns.get_loc(start_label)
-    f = df.columns.get_loc(end_label)
-    return list(df.columns[s : f + 1])
-
-
-def nest(a, b):
-    """
-    For constructing a pd.Multiindex for the data,
-    return a list of tuples from the cartesian product of a top level label and a list of sub-labels
-    """
-    return list(itertools.product(a, b))
-
-
-def make_multiindex_from_map(df, map):
-    """
-    For constructing a pd.Multiindex for the data columns of df
-    Given a dict, `map`, whose keys are top level labels and whose value are a 2 item list with start and end column labels
-    construct a pd.MultiIndex that gathers up all the columns between the starts and ends and associates them with the appropriate label
-    returns a two-level multiindex
-    """
-    return pd.MultiIndex.from_tuples(
-        list(
-            itertools.chain(
-                *[nest([k], getcolrange(df, v[0], v[1])) for k, v in map.items()]
-            )
-        )
+    p = defaultdict(
+        (lambda: lambda x: None),
+        {
+            "article": (lambda x: x.fields_dict["journaltitle"].value),
+            "inproceedings": (
+                lambda x: (
+                    x.fields_dict["eventtitle"].value
+                    if "eventtitle" in x.fields_dict
+                    else x.fields_dict["booktitle"].value
+                )
+            ),
+        },
     )
 
+    pubs = [
+        (
+            (
+                t.get(v.entry_type, v.entry_type)
+                if v.entry_type != "thesis"
+                else v.fields_dict["type"].value
+            ),
+            p[v.entry_type](v),
+            v.fields_dict["doi"].value if "doi" in v.fields_dict else None,
+        )
+        for k, v in library.entries_dict.items()
+    ]
 
-def load_survey_data(path, skiprows, map):
+    pubs_df = pd.DataFrame.from_records(
+        pubs,
+        index=[k for k in library.entries_dict.keys()],
+        columns=["type", "venue", "doi"],
+    )
+    pubs_df.fillna(pd.NA, inplace=True)
+
+    # purge the publication venues of braces
+    debrace_re = re.compile(r"[\{\}]")
+    pubs_df.venue = pubs_df.venue.apply(
+        lambda s: debrace_re.sub(lambda x: "", s) if not pd.isnull(s) else pd.NA
+    )
+    pubs_df.type.astype("category")
+    return pubs_df
+
+
+def load_mgr_survey(path, bibpath=None):
     """
-    read in and tidy a csv file and make a nice multindex for columns
-    at this point still requires user to supply N of records to read. Fix this later if it makes us sad
+    Load up the survey data from the spreadsheet
+    Return a nice boolean dataframe with a multiindex
     """
-    df = read_survey_csv(path, skiprows)
-    newidx = make_multiindex_from_map(df, map)
-    df.columns = newidx
-    return df
+    # load raw csv; header=[0,1] creates us a multiindex on columns, but it will need some tidying
+    df = pd.read_csv(
+        path, header=[0, 1], skip_blank_lines=True, index_col=0, skipinitialspace=True
+    )
+    # needs some tidying
 
+    # original survey data missing label for contribution type category
+    # df.columns['Unnamed: 2_level_0'] = 'FUNCTION'
 
-if __name__ == "__main__":
-    read_survey_csv("../../../data/new_survey.csv")
+    # nans => 0s
+    df.fillna(0, inplace=True)
+    # surplus columns:
+    #  - any at level 1 of multiindex containing 'unnamed'
+    #  - spreadsheet columns that were just doing summations
+
+    surplus_columns = df.columns[
+        df.columns.get_level_values(1).str.contains("Unnamed")
+        | df.columns.get_level_values(1).str.contains("No. datasets")
+        | df.columns.get_level_values(1).str.contains("Number public")
+    ]
+    df.drop(columns=surplus_columns, inplace=True)
+
+    # surely a better way exists
+    col_tup = list(df.columns.to_flat_index())
+    loc_private = df.columns.get_level_values(1).get_loc("Private data")
+    loc_music = df.columns.get_level_values(1).get_loc("Music audio")
+    col_tup[loc_private] = ("Private", "data")
+    col_tup[loc_music] = ("modality", "Music audio")
+    df.columns = pd.MultiIndex.from_tuples(col_tup)
+    # # now sort out the multiindex so that the top level is correct: replace all unnamed with the preceding label
+    df.columns = pd.MultiIndex.from_frame(
+        df.columns.to_frame()
+        .apply(lambda x: np.where(x.str.contains("Unnamed"), np.nan, x))
+        .ffill()
+    )
+    # make column labels lower snake case and free of punctuation
+    punc = re.compile(r"[^A-Z,a-z,0-9,_]")
+    space = re.compile(r"[\s,-]")
+    formatter = lambda s: punc.sub("", space.sub("_", s)).lower()
+    top_level = list(map(formatter, df.columns.get_level_values(0)))
+    first_level = list(map(formatter, df.columns.get_level_values(1)))
+    df.columns = pd.MultiIndex.from_arrays(
+        [top_level, first_level], names=["category", "variable"]
+    )
+
+    # # get rid of unneeded rows
+    df = df.iloc[0 : df.index.get_loc("TOTALS") - 1]
+    df = df[df.index.notnull()]
+
+    # make it bool
+    df = df.astype("bool")
+
+    # add a year column
+    regex_year = re.compile(r".+([0-9]{4})[a-z]?")
+    df["year"] = [int(regex_year.match(e).groups()[0]) for e in list(df.index)]
+
+    return df if not bibpath else (df, load_bib(bibpath))
