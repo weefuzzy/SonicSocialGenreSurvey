@@ -10,7 +10,7 @@ packages = [{include = "sonicsocialgenre_survey"}]
 python = "^3.10"
 pandas = "^2.2.0"
 matplotlib = "^3.8.2"
-bibtexparser = {version = "^2.0.0" allow-prereleases = true}
+bibtexparser = {version = "^2.0.0", allow-prereleases = true}
 
 
 [build-system]
