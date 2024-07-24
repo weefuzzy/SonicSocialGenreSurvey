@@ -1,13 +1,19 @@
 # Code, data and Supplement for 'A Critical Survey of Research in Music Genre Recognition'
 
+\[paper link to come \]
+
 ## Supplement PDF
 
-Details on methods and current online locations for GTZAN
+Details on methods given in paper and current online locations for GTZAN
 
 ## Data 
 
 * Bibliography `.bib` file
 * `.csv` of survey data used in the paper
+
+### Corrections 
+
+We welcome corrections to any errors in the data / bibliography that are found (by filing an issue or a PR), as well as suggestions of any omissions. 
 
 ## Code 
 
